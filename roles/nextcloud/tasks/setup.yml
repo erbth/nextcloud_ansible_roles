@@ -244,7 +244,7 @@
 
  - name: Copy nextcloud code to remote machine
    ansible.builtin.copy:
-     src: nextcloud-23.0.3.tar.bz2
+     src: nextcloud-24.0.7.tar.bz2
      dest: "/tmp/tmp/"
    when: not stat_nextcloud.stat.exists
 
@@ -519,7 +519,7 @@
    become: yes
    ansible.builtin.systemd:
      name: "nextcloud_ldap_cleanup@{{nextcloud_www_dir}}.timer"
-     enabled: enabled
+     enabled: yes
      state: started
    when: nextcloud_ldap_enabled
 
