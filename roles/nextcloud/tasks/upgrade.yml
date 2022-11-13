@@ -1,0 +1,63 @@
+# Copyright 2022 Thomas Erbesdobler <t.erbesdobler@gmx.de>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+---
+# Upgrade a single instance
+
+ - name: Enable maintenance mode
+   become: yes
+   become_user: www-data
+   ansible.builtin.command:
+     argv:
+       - /usr/bin/php
+       - "/var/www/{{nextcloud_www_dir}}/occ"
+       - "maintenance:mode"
+       - "--on"
+
+ - name: Run the updater
+   become: yes
+   become_user: www-data
+   ansible.builtin.command:
+     argv:
+       - /usr/bin/php
+       - "/var/www/{{nextcloud_www_dir}}/updater/updater.phar"
+       - "-n"
+
+ - name: Add missing indices
+   become: yes
+   become_user: www-data
+   ansible.builtin.command:
+     argv:
+       - /usr/bin/php
+       - "/var/www/{{nextcloud_www_dir}}/occ"
+       - "db:add-missing-indices"
+
+ - name: Update apps
+   become: yes
+   become_user: www-data
+   ansible.builtin.command:
+     argv:
+       - /usr/bin/php
+       - "/var/www/{{nextcloud_www_dir}}/occ"
+       - "app:update"
+       - "--all"
+
+ - name: Disable maintenance mode
+   become: yes
+   become_user: www-data
+   ansible.builtin.command:
+     argv:
+       - /usr/bin/php
+       - "/var/www/{{nextcloud_www_dir}}/occ"
+       - "maintenance:mode"
+       - "--off"

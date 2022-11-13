@@ -1,0 +1,6 @@
+[Unit]
+Description=Nextcloud's bruteforce attempt cleaner job [%i]
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/nextcloud_clean_bruteforce_attempts.sh %i

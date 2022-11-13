@@ -1,0 +1,64 @@
+# Copyright 2022 Thomas Erbesdobler <t.erbesdobler@gmx.de>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Configure unattended upgrades
+---
+ - name: Unattended upgrades - install packages
+   become: yes
+   ansible.builtin.apt:
+     name: [unattended-upgrades, apt-listchanges]
+     install_recommends: no
+
+ - name: Unattended upgrades - configure
+   become: yes
+   ansible.builtin.template:
+     src: 50unattended-upgrades
+     dest: /etc/apt/apt.conf.d/50unattended-upgrades
+     owner: root
+     group: root
+     mode: 0644
+     backup: yes
+
+# - name: Unattended upgrades - enable
+#   become: yes
+#   ansible.builtin.shell:
+#     cmd: |
+#       set -e
+#       if debconf-show unattended-upgrades unattended-upgrades/enable_auto_updates | grep false
+#       then
+#         echo debug1
+#         debconf-show unattended-upgrades
+#         echo unattended-upgrades unattended-upgrades/enable_auto_updates boolean true | debconf-set-selections
+#         echo debug2
+#         debconf-show unattended-upgrades
+#         dpkg-reconfigure -f noninteractive unattended-upgrades
+#         echo debug3
+#         debconf-show unattended-upgrades
+#         exit 20
+#       else
+#         exit 0
+#       fi
+#     executable: /bin/bash
+#   register: unatt_enable
+#   changed_when: unatt_enable.rc == 20
+#   failed_when: unatt_enable.rc != 0 and unatt_enable.rc != 20
+
+ - name: Unattended upgrades - enable
+   become: yes
+   ansible.builtin.copy:
+     src: 20auto-upgrades
+     dest: /etc/apt/apt.conf.d/20auto-upgrades
+     owner: root
+     group: root
+     mode: 0644

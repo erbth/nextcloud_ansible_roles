@@ -1,0 +1,57 @@
+# Copyright 2022 Thomas Erbesdobler <t.erbesdobler@gmx.de>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+---
+ - name: Check if mysql's data directory needs to be moved
+   become: yes
+   ansible.builtin.stat:
+     path: /data/mysql
+     get_checksum: no
+     follow: no
+   register: new_dir
+
+ - name: Stop mysql
+   become: yes
+   ansible.builtin.systemd:
+     name: mysql.service
+     state: stopped
+   when: not new_dir.stat.exists
+
+ - name: Copy data directory
+   become: yes
+   ansible.builtin.command:
+     cmd: "cp -a /var/lib/mysql /data/mysql"
+   when: not new_dir.stat.exists
+
+ - name: Adapt mysql config
+   become: yes
+   ansible.builtin.replace:
+     backup: yes
+     path: /etc/mysql/mariadb.conf.d/50-server.cnf
+     regexp:  '^(datadir\s*=\s*)\S+$'
+     replace: '\1/data/mysql'
+   when: not new_dir.stat.exists
+
+ - name: Start mysql
+   become: yes
+   ansible.builtin.systemd:
+     name: mysql.service
+     state: started
+   when: not new_dir.stat.exists
+
+ - name: Delete old data directory
+   become: yes
+   ansible.builtin.file:
+     path: /var/lib/mysql
+     state: absent
+   when: not new_dir.stat.exists

@@ -1,0 +1,592 @@
+# Copyright 2022 Thomas Erbesdobler <t.erbesdobler@gmx.de>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+---
+# Deploy a nextcloud installation on a dedicated single machine
+
+# Include nftables
+ - name: Firewall
+   import_tasks: nftables.yml
+
+# Install packages
+ - name: Install Debian packages
+   become: yes
+   apt:
+     name:
+       - acl
+       - attr
+       - rsyslog
+       - apache2
+       - libapache2-mod-php
+       - mariadb-server
+       - python3-pymysql
+       - redis
+       - php
+       - php-curl
+       - php-xml
+       - php-gd
+       - php-mbstring
+       - php-zip
+       - php-mysql
+       - php-bz2
+       - php-intl
+       - php-ldap
+       - php-bcmath
+       - php-gmp
+       - php-apcu
+       - php-redis
+       - php-imagick
+       - ffmpeg
+       - libmagickcore-6.q16-6-extra
+     install_recommends: no
+   notify: "nextcloud : restart_apache2"
+
+# Create /data if it does not yet exist
+ - name: Create /data
+   become: yes
+   ansible.builtin.file:
+     state: directory
+     path: /data
+     owner: root
+     group: root
+     mode: '755'
+
+# Check if nextcloud is installed
+ - name: Checking if nextcloud is installed already
+   ansible.builtin.stat:
+     path: "/var/www/{{nextcloud_www_dir}}/config/config.php"
+     follow: no
+     get_checksum: no
+   register: nextcloud_installed_stat
+
+ - name: Move mysql database files to /data
+   import_tasks: move_mysql.yml
+
+# Create database
+ - name: Generate a random db user password
+   ansible.builtin.command:
+     cmd: "pwgen -s 20 1"
+   register: nextcloud_generated_db_password
+   delegate_to: 127.0.0.1
+   no_log: yes
+   changed_when: False
+
+ - name: Create database
+   become: yes
+   community.mysql.mysql_db:
+     name: "{{nextcloud_db_name}}"
+     encoding: utf8mb4
+     collation: utf8mb4_general_ci
+     state: present
+     login_unix_socket: /var/run/mysqld/mysqld.sock
+
+ - name: Create db user
+   become: yes
+   community.mysql.mysql_user:
+     name: "{{nextcloud_db_user}}"
+     host: localhost
+     password: "{{nextcloud_generated_db_password.stdout}}"
+     update_password: on_create
+     priv: "{{nextcloud_db_name}}.*:ALL"
+     login_unix_socket: /var/run/mysqld/mysqld.sock
+   no_log: yes
+
+ - name: Update the db user's password if nextcloud is not installed
+   become: yes
+   community.mysql.mysql_user:
+     name: "{{nextcloud_db_user}}"
+     host: localhost
+     password: "{{nextcloud_generated_db_password.stdout}}"
+     update_password: always
+     login_unix_socket: /var/run/mysqld/mysqld.sock
+   when: not nextcloud_installed_stat.stat.exists
+   no_log: yes
+
+# Basic configuration of PHP
+ - name: Configure php for Apache2's mod_php
+   become: yes
+   ansible.builtin.copy:
+     backup: yes
+     src: apache_php.ini
+     dest: /etc/php/7.4/apache2/php.ini
+     owner: root
+     group: root
+     mode: 0644
+   notify: "nextcloud : restart_apache2"
+
+ - name: Configure php for cli
+   become: yes
+   ansible.builtin.copy:
+     backup: yes
+     src: cli_php.ini
+     dest: /etc/php/7.4/cli/php.ini
+     owner: root
+     group: root
+     mode: 0644
+
+# Basic configuration of webserver
+ - name: Enable/disable Apache2 modules and configurations
+   become: yes
+   ansible.builtin.shell:
+     cmd: |
+       set -e
+
+       MODS_BEFORE="$(ls /etc/apache2/mods-enabled)"
+       CONF_BEFORE="$(ls /etc/apache2/conf-enabled)"
+
+       a2enmod php7.4 rewrite headers env dir mime ssl
+       a2dismod dav
+       a2disconf serve-cgi-bin
+
+       MODS_AFTER="$(ls /etc/apache2/mods-enabled)"
+       CONF_AFTER="$(ls /etc/apache2/conf-enabled)"
+
+       if [ "$MODS_BEFORE" != "$MODS_AFTER" ] || [ "$CONF_BEFORE" != "$CONF_AFTER" ]
+       then
+         exit 20
+       else
+         exit 0
+       fi
+     executable: /bin/bash
+   register: apache_modules
+   changed_when: apache_modules.rc == 20
+   failed_when: apache_modules.rc != 0 and apache_modules.rc != 20
+   notify: "nextcloud : restart_apache2"
+
+ - name: Remove default sites
+   become: yes
+   ansible.builtin.file:
+     path: "{{item}}"
+     state: absent
+   loop:
+     - /etc/apache2/sites-enabled/000-default.conf
+     - /etc/apache2/sites-enabled/default-ssl.conf
+     - /etc/apache2/sites-available/000-default.conf
+     - /etc/apache2/sites-available/default-ssl.conf
+   notify: "nextcloud : restart_apache2"
+
+# Basic configuration of redis
+ - name: Configure redis
+   become: yes
+   ansible.builtin.template:
+     backup: yes
+     src: redis.conf
+     dest: /etc/redis/redis.conf
+     owner: redis
+     group: redis
+     mode: 0640
+   register: redis_conf
+
+ - name: Create redis systemd unit overwrite directory
+   become: yes
+   ansible.builtin.file:
+     path: /etc/systemd/system/redis-server.service.d
+     owner: root
+     group: root
+     mode: 0755
+     state: directory
+
+ - name: Adapt the redis systemd unit
+   become: yes
+   ansible.builtin.copy:
+     src: redis_umask.conf
+     dest: /etc/systemd/system/redis-server.service.d/umask.conf
+     owner: root
+     group: root
+     mode: 0644
+   register: redis_systemd
+
+ - name: Daemon reload
+   become: yes
+   ansible.builtin.systemd:
+     daemon_reload: yes
+   when: redis_systemd.changed
+
+ - name: Restart redis if required
+   become: yes
+   ansible.builtin.systemd:
+     name: redis.service
+     state: restarted
+   when: redis_conf.changed or redis_systemd.changed
+
+ - name: Restart redis a second time if required
+   become: yes
+   ansible.builtin.systemd:
+     name: redis.service
+     state: restarted
+   when: redis_systemd.changed
+
+ - name: Add user www-data to group redis
+   become: yes
+   ansible.builtin.user:
+     name: www-data
+     append: yes
+     groups: redis
+   notify: "nextcloud : restart_apache2"
+
+# Deploy nextcloud code
+ - name: Checking if nextcloud has already been deployed initially
+   ansible.builtin.stat:
+     path: "/var/www/{{nextcloud_www_dir}}"
+     get_checksum: no
+     follow: no
+   register: stat_nextcloud
+
+ - name: Copy nextcloud code to remote machine
+   ansible.builtin.copy:
+     src: nextcloud-23.0.3.tar.bz2
+     dest: "/tmp/tmp/"
+   when: not stat_nextcloud.stat.exists
+
+ - name: Unpack and install nextcloud
+   become: yes
+   ansible.builtin.shell: |
+     set -e
+     cd /tmp/tmp
+     tar -xf nextcloud-*.tar.bz2
+     chown -R www-data:www-data nextcloud
+     rm -rf /var/www/{{nextcloud_www_dir}}
+     mv nextcloud /var/www/{{nextcloud_www_dir}}
+   args:
+     executable: /bin/bash
+     creates: "/var/www/{{nextcloud_www_dir}}"
+   when: not stat_nextcloud.stat.exists
+   notify: "nextcloud : restart_apache2"
+
+ - name: Create web root
+   become: yes
+   ansible.builtin.file:
+     path: /var/www/root
+     state: directory
+     mode: 0755
+     owner: root
+     group: root
+   notify: "nextcloud : restart_apache2"
+
+ - name: Copy root .htaccess
+   become: yes
+   ansible.builtin.copy:
+     backup: no
+     src: root_htaccess
+     dest: /var/www/root/.htaccess
+     owner: root
+     group: root
+     mode: 0644
+   notify: "nextcloud : restart_apache2"
+
+
+# Create data directory if it does not exist yet
+ - name: Create data directory if it des not exist
+   become: yes
+   ansible.builtin.file:
+     state: directory
+     path: "/data/{{nextcloud_data_dir}}"
+     owner: www-data
+     group: www-data
+     mode: "700"
+
+# Create log file directory if it does not exist yet
+ - name: Create log file directory
+   become: yes
+   ansible.builtin.file:
+     state: directory
+     path: "/var/log/nextcloud_{{nextcloud_www_dir}}"
+     owner: www-data
+     group: root
+     mode: 0750
+
+
+# Install nextcloud
+ - name: Generating initial admin password
+   ansible.builtin.command:
+     cmd: "pwgen -s 20 1"
+   register: nextcloud_generated_admin_password
+   delegate_to: 127.0.0.1
+   changed_when: false
+   no_log: true
+
+ - name: Initially installing nextcloud
+   become_user: www-data
+   become: yes
+   ansible.builtin.shell: |
+     if ! php occ maintenance:install \
+        --database mysql \
+        --database-name "{{nextcloud_db_name}}" \
+        --database-user "{{nextcloud_db_user}}" \
+        --database-pass "{{nextcloud_generated_db_password.stdout}}" \
+        --admin-user "{{nextcloud_admin_username}}" \
+        --admin-pass "{{nextcloud_generated_admin_password.stdout}}" \
+        --data-dir "/data/{{nextcloud_data_dir}}"
+     then
+       #rm -f "/var/www/{{nextcloud_www_dir}}/config/config.php"
+       exit 1
+     fi
+   args:
+     executable: /bin/bash
+     creates: "/var/www/{{nextcloud_www_dir}}/config/config.php"
+     chdir: "/var/www/{{nextcloud_www_dir}}"
+   vars:
+     ansible_pipelining: yes
+   no_log: true
+   register: nextcloud_install
+   notify: "nextcloud : restart_apache2"
+
+ - name: Print the generated admin password
+   ansible.builtin.debug:
+     msg: >-
+       Newly generated password for admin user "{{nextcloud_admin_username}}":
+       {{nextcloud_generated_admin_password.stdout}}
+   when: nextcloud_install.changed
+
+# Configure nextcloud
+ - name: Transfer update_nextcloud_config.py
+   become: yes
+   ansible.builtin.copy:
+     src: update_nextcloud_config.py
+     dest: /usr/local/bin/update_nextcloud_config.py
+     owner: root
+     group: root
+     mode: 0755
+
+ - name: Updating config.php
+   become: yes
+   ansible.builtin.command:
+     argv:
+        - /usr/local/bin/update_nextcloud_config.py
+        - "/var/www/{{nextcloud_www_dir}}/config/config.php"
+     stdin: "{{lookup('ansible.builtin.template', 'config_update.php')}}"
+     stdin_add_newline: no
+   register: r
+   changed_when: r.rc == 20
+   failed_when: r.rc != 0 and r.rc != 20
+   notify: "nextcloud : restart_apache2"
+
+ - name: Ensure permissions of config.php
+   become: yes
+   ansible.builtin.stat:
+     path: "/var/www/{{nextcloud_www_dir}}/config/config.php"
+     get_checksum: no
+     follow: no
+   register: r
+   failed_when: >-
+     not r.stat.isreg or r.stat.pw_name != "www-data" or r.stat.gr_name != "www-data" or
+     r.stat.mode != "0640"
+
+# The logfile is in its new place, delete it in the data directory
+ - name: Flush handlers
+   meta: flush_handlers
+
+ - name: Remove temporary logfile from data directory
+   become: yes
+   ansible.builtin.file:
+     path: "/data/{{nextcloud_data_dir}}/nextcloud.log"
+     state: absent
+
+# Add additional jobs etc.
+ - name: Configure Apache2's logrotate
+   become: yes
+   ansible.builtin.template:
+     src: apache2.logrotate
+     dest: /etc/logrotate.d/apache2
+     owner: root
+     group: root
+     mode: 0644
+
+ - name: Configure nextcloud logrotate
+   become: yes
+   ansible.builtin.template:
+     src: nextcloud.logrotate
+     dest: "/etc/logrotate.d/nextcloud_{{nextcloud_www_dir}}"
+     owner: root
+     group: root
+     mode: 0644
+
+
+ - name: Copy nextcloud cron job systemd unit files
+   become: yes
+   ansible.builtin.copy:
+     src: "{{item}}"
+     dest: "/etc/systemd/system/{{item}}"
+     owner: root
+     group: root
+     mode: 0644
+   loop:
+     - nextcloud_cron@.service
+     - nextcloud_cron@.timer
+   register: res
+
+ - name: Reload systemd if required
+   become: yes
+   ansible.builtin.systemd:
+     daemon_reload: yes
+   when: res.changed
+
+ - name: Enable and start cron job systemd unit
+   become: yes
+   ansible.builtin.systemd:
+     name: "nextcloud_cron@{{nextcloud_www_dir}}.timer"
+     enabled: yes
+     state: restarted
+   when: res.changed
+
+
+ - name: Copy nextcloud clean bruteforce attempts script
+   become: yes
+   ansible.builtin.copy:
+     src: nextcloud_clean_bruteforce_attempts.sh
+     dest: "/usr/local/bin/nextcloud_clean_bruteforce_attempts.sh"
+     owner: root
+     group: root
+     mode: 0755
+   register: res_script
+
+ - name: Copy nextcloud clean bruteforce attempts systemd unit files
+   become: yes
+   ansible.builtin.copy:
+     src: "{{item}}"
+     dest: "/etc/systemd/system/{{item}}"
+     owner: root
+     group: root
+     mode: 0644
+   loop:
+     - nextcloud_clean_bruteforce@.service
+     - nextcloud_clean_bruteforce@.timer
+   register: res_systemd
+
+ - name: Reload systemd if required
+   become: yes
+   ansible.builtin.systemd:
+     daemon_reload: yes
+   when: res_systemd.changed
+
+ - name: Enable and start nextcloud clean bruteforce attempts
+   become: yes
+   ansible.builtin.systemd:
+     name: "nextcloud_clean_bruteforce@{{nextcloud_db_name}}.timer"
+     enabled: yes
+     state: restarted
+   when: res_systemd.changed
+
+
+ - name: Copy nextcloud clean LDAP remnants script
+   become: yes
+   ansible.builtin.copy:
+     src: nextcloud_ldap_cleanup.py
+     dest: "/usr/local/bin/nextcloud_ldap_cleanup.py"
+     owner: root
+     group: root
+     mode: 0755
+   register: res_systemd
+
+ - name: Copy nextcloud clean LDAP remnants systemd unit files
+   become: yes
+   ansible.builtin.copy:
+     src: "{{item}}"
+     dest: "/etc/systemd/system/{{item}}"
+     owner: root
+     group: root
+     mode: 0644
+   loop:
+     - nextcloud_ldap_cleanup@.service
+     - nextcloud_ldap_cleanup@.timer
+   register: res_systemd
+
+ - name: Reload systemd if required
+   become: yes
+   ansible.builtin.systemd:
+     daemon_reload: yes
+   when: res_systemd.changed
+
+ - name: Disable nextcloud clean LDAP remnants
+   become: yes
+   ansible.builtin.systemd:
+     name: "nextcloud_ldap_cleanup@{{nextcloud_www_dir}}.timer"
+     enabled: no
+     state: stopped
+   when: not nextcloud_ldap_enabled
+
+ - name: Enable nextcloud clean LDAP remnants
+   become: yes
+   ansible.builtin.systemd:
+     name: "nextcloud_ldap_cleanup@{{nextcloud_www_dir}}.timer"
+     enabled: enabled
+     state: started
+   when: nextcloud_ldap_enabled
+
+ - name: Restart nextcloud clean LDAP remnants timer
+   become: yes
+   ansible.builtin.systemd:
+     name: "nextcloud_ldap_cleanup@{{nextcloud_www_dir}}.timer"
+     state: restarted
+   when: nextcloud_ldap_enabled and res_systemd.changed
+
+
+# Deploy certificate
+ - name: Ensure TLS certficate directory
+   become: yes
+   ansible.builtin.file:
+     path: "/srv/tls"
+     state: directory
+     owner: root
+     group: root
+     mode: "755"
+
+# Configure rsyslog
+ - name: rsyslog
+   import_tasks: configure_rsyslog.yml
+
+# Install exim4
+ - name: install exim4
+   import_tasks: exim4.yml
+
+# Create a self-signed certificate if required
+ - name: Create self-signed certificates
+   become: yes
+   ansible.builtin.shell: |
+     set -e
+     openssl genrsa -out "/srv/tls/{{nextcloud_www_dir}}.key" 4096
+     openssl req -x509 \
+        -key "/srv/tls/{{nextcloud_www_dir}}.key" \
+        -out "/srv/tls/{{nextcloud_www_dir}}.pem" \
+        -subj "/CN={{ nextcloud_selfgen_cert_subject | default(nextcloud_trusted_domains|first) }}" \
+        -days 3652
+   args:
+     executable: /bin/bash
+     creates: "/srv/tls/{{nextcloud_www_dir}}.pem"
+   notify: "nextcloud : restart_apache2"
+
+# Install php-smbclient if required
+ - name: Install php-smbclient
+   import_tasks: install_php_smbclient.yml
+   when: nextcloud_install_smbclient
+
+# Enable nextcloud in Apache2
+ - name: Create Apache site
+   become: yes
+   ansible.builtin.template:
+     src: nextcloud_apache.conf.j2
+     dest: "/etc/apache2/sites-available/{{nextcloud_www_dir}}.conf"
+     owner: root
+     group: root
+     mode: "644"
+   notify: "nextcloud : restart_apache2"
+
+ - name: Enable Apache site
+   become: yes
+   ansible.builtin.file:
+     src:  "/etc/apache2/sites-available/{{nextcloud_www_dir}}.conf"
+     path: "/etc/apache2/sites-enabled/{{nextcloud_www_dir}}.conf"
+     state: link
+     owner: root
+     group: root
+   notify: "nextcloud : restart_apache2"

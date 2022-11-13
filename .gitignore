@@ -1,0 +1,6 @@
+*.swp
+
+# Site specific settings
+/hosts
+/host_vars
+/group_vars

@@ -1,0 +1,12 @@
+This is a collection of Ansible-tasks organized as roles for deploying
+Nextcloud. The substantial task-files itself are subject to the Apache License,
+Version 2.0, and are marked as such.
+
+Many of the files- and templates to deploy onto target machines have been taken
+from a Debian bullseye system or have at least been inspired by such.
+
+The files in roles/common/files/usercfg/ are a version of my personal user
+config files ("dotfiles"). The bashrc was probably originally based on Debian's
+default for new user accounts.
+
+13. November, Thomas Erbesdobler <t.erbesdobler@gmx.de>

@@ -1,0 +1,54 @@
+# Copyright 2022 Thomas Erbesdobler <t.erbesdobler@gmx.de>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+---
+nextcloud_db_name: "nextcloud"
+nextcloud_db_user: "nextcloud"
+nextcloud_admin_username: "admin"
+nextcloud_www_dir: "nextcloud"
+nextcloud_data_dir: "nextcloud"
+
+nextcloud_web_root: "nextcloud"
+
+nextcloud_trusted_proxies: []
+nextcloud_forwarded_for_headers: ['HTTP_X_FORWARDED_FOR']
+
+nextcloud_log_retention_days: 7
+
+# Optionally followed by :<port>
+# NOTE: If used, consider to change exim4...
+nextcloud_mail_smtphost: "127.0.0.1"
+
+# Can be set if e.g. this domain's mx record points to a RFC1918 local address.
+# This will not be an open relay because exim4 does only listen on the link
+# local interface.
+# nextcloud_exim4_relay_domains: []
+
+# Optional exim4 smarthost with optional credentials
+# nextcloud_exim4_smarthost: "<hostname/ip>[::<port>]"
+# nextcloud_exim4_smarthost_login: "<login>:<password>"
+
+# Can be set additionally:
+#nextcloud_trusted_domains: [...]
+
+#nextcloud_selfgen_cert_subject: ...
+# (if undefined, nextcloud_trusted_domains|first will be used in case a
+# self-signed certificate is created)
+
+#nextcloud_mail_domain:       "..."
+#nextcloud_mail_from_address: "..."
+
+#nextcloud_default_phone_region: "de"
+
+nextcloud_ldap_enabled: no
+nextcloud_install_smbclient: no

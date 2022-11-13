@@ -1,0 +1,15 @@
+/var/log/mail.info
+/var/log/mail.warn
+/var/log/mail.err
+{
+	rotate {{nextcloud_log_retention_days}}
+	daily
+	missingok
+	# notifempty
+	compress
+	delaycompress
+	sharedscripts
+	postrotate
+		/usr/lib/rsyslog/rsyslog-rotate
+	endscript
+}

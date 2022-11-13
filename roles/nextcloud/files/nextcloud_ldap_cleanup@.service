@@ -1,0 +1,6 @@
+[Unit]
+Description=Nextcloud's LDAP cleanup [%i]
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/nextcloud_ldap_cleanup.py %i

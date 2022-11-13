@@ -1,0 +1,4 @@
+# termcapinfo xterm* ti@:te@
+altscreen on
+defbce on
+set term=screen-256color

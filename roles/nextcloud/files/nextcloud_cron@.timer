@@ -1,0 +1,11 @@
+[Unit]
+Description=Nextcloud's cron job [%i]
+
+[Timer]
+OnUnitActiveSec=5m
+OnBootSec=5m
+AccuracySec=1m
+Persistent=False
+
+[Install]
+WantedBy=timers.target

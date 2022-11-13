@@ -1,0 +1,9 @@
+[Unit]
+Description=Nextcloud's bruteforce attempt cleaner job [%i]
+
+[Timer]
+OnCalendar=*-*-* 00:00:00
+Persistent=False
+
+[Install]
+WantedBy=timers.target

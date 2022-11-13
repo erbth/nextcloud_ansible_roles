@@ -1,0 +1,38 @@
+# Copyright 2022 Thomas Erbesdobler <t.erbesdobler@gmx.de>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+---
+# Install manually compiled php-smbclient, which is not in the stable Debian
+# distribution due to licensing issues
+
+ - name: Check if php-smbclient is installed
+   ansible.builtin.shell: |
+     dpkg-query -W php7.4-smbclient | grep 1.0.6-6
+   args:
+     executable: /bin/bash
+   register: check_smbclient
+   failed_when: check_smbclient.rc != 0 and check_smbclient.rc != 1
+   changed_when: false
+
+ - name: Copy php-smbclient .deb to target
+   ansible.builtin.copy:
+     src: php7.4-smbclient_1.0.6-6_amd64.deb
+     dest: "/tmp/tmp/"
+   when: check_smbclient.rc != 0
+
+ - name: Install php-smbclient
+   become: yes
+   ansible.builtin.apt:
+     deb: "/tmp/tmp/php7.4-smbclient_1.0.6-6_amd64.deb"
+   when: check_smbclient.rc != 0
+   notify: "nextcloud : restart_apache2"

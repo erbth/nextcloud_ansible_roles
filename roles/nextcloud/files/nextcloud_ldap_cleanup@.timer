@@ -1,0 +1,9 @@
+[Unit]
+Description=Nextcloud's LDAP cleanup [%i]
+
+[Timer]
+OnCalendar=*-*-* 00:10:00
+Persistent=False
+
+[Install]
+WantedBy=timers.target

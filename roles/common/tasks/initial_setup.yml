@@ -1,0 +1,146 @@
+# Copyright 2022 Thomas Erbesdobler <t.erbesdobler@gmx.de>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+---
+# Basic configuration of a server
+
+- name: Install open-vm-tools
+  become: yes
+  apt:
+    name: open-vm-tools
+    install_recommends: no
+  when: ansible_facts['virtualization_role'] == "guest"
+
+- name: Install convenient packages
+  become: yes
+  apt:
+    name:
+      - vim
+      - sudo
+      - screen
+      - zsh
+
+- name: Install more convenient packages
+  become: yes
+  apt:
+    name:
+      - gpg
+      - git
+      - patch
+    install_recommends: no
+
+- name: Set editor
+  become: yes
+  ansible.builtin.shell: |
+    if [ -z "$(update-alternatives --get-selections | grep '^editor' | grep vim)" ]
+    then
+      update-alternatives --set editor /usr/bin/vim.basic
+    else
+      exit 20
+    fi
+  args:
+    executable: /bin/bash
+  register: set_editor
+  changed_when: set_editor.rc == 0
+  failed_when: set_editor.rc != 0 and set_editor.rc != 20
+
+
+# sshd config
+- name: Set sshd config
+  become: yes
+  ansible.builtin.copy:
+    backup: yes
+    src: sshd_config
+    dest: /etc/ssh/sshd_config
+    owner: root
+    group: root
+    mode: 0644
+  register: copy_sshd_config
+
+- name: Restart sshd
+  become: yes
+  ansible.builtin.systemd:
+    name: sshd.service
+    state: restarted
+  when: copy_sshd_config.changed
+
+
+# Personal settings for adminuser (if present) and root
+- name: Check if a home of user admin-user exists
+  ansible.builtin.stat:
+    path: /home/{{adminuser}}
+  register: adminuser_home
+
+- name: Set the admin-user's personal configuration files
+  become: yes
+  ansible.builtin.copy:
+    src: "{{item}}"
+    dest: "/home/{{adminuser}}/.{{item | basename}}"
+    owner: "{{adminuser}}"
+    group: "{{adminuser}}"
+    mode: 0644
+  loop:
+    - usercfg/bashrc
+    - usercfg/screenrc
+    - usercfg/toprc
+    - usercfg/vimrc
+    - usercfg/zshrc
+  when: adminuser_home.stat.isdir is defined and adminuser_home.stat.isdir
+
+- name: Change the admin-user's login-shell to zsh
+  become: yes
+  ansible.builtin.user:
+    name: "{{adminuser}}"
+    shell: /bin/zsh
+
+- name: Set root's personal configuration files
+  become: yes
+  ansible.builtin.copy:
+    src: "{{item}}"
+    dest: "/root/.{{item | basename}}"
+    owner: root
+    group: root
+    mode: 0644
+  loop:
+    - usercfg/bashrc
+    - usercfg/screenrc
+    - usercfg/toprc
+    - usercfg/vimrc
+    - usercfg/zshrc
+
+- name: Configure systemd-journald
+  become: yes
+  ansible.builtin.template:
+    src: journald.conf
+    dest: /etc/systemd/
+    owner: root
+    group: root
+    mode: 0644
+  register: configure_journald
+
+- name: Restart journald
+  become: yes
+  ansible.builtin.systemd:
+    name: systemd-journald.service
+    state: restarted
+  when: configure_journald.changed
+
+
+# Configure unattended upgrades if requested
+- name: Configure unattended upgrades
+  ansible.builtin.import_tasks: unattended_upgrades_debian.yml
+  when: enable_unattended_upgrades is not defined or enable_unattended_upgrades
+
+- name: Install exim4 MTA and bsd-mailx
+  ansible.builtin.import_tasks: exim4_debian.yml
+  when: install_exim4 is defined and install_exim4

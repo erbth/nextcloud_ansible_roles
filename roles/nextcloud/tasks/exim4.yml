@@ -1,0 +1,70 @@
+# Copyright 2022 Thomas Erbesdobler <t.erbesdobler@gmx.de>
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+---
+ - name: Install exim4
+   become: yes
+   ansible.builtin.apt:
+     name:
+       - exim4-daemon-light
+       - bsd-mailx
+     install_recommends: no
+
+ - name: Fetch remote mailname
+   ansible.builtin.slurp:
+     src: /etc/mailname
+   register: etc_mailname_file
+
+ - name: Configure exim4 for an internet site
+   become: yes
+   ansible.builtin.template:
+     src: update-exim4.conf.conf
+     dest: /etc/exim4/update-exim4.conf.conf
+     owner: root
+     group: root
+     mode: 0644
+   vars:
+     etc_mailname: "{{etc_mailname_file['content'] | b64decode | trim}}"
+   register: exim4_conf_file
+
+ - name: Set exim4 smarthost login
+   become: yes
+   ansible.builtin.template:
+     src: exim4_passwd.client
+     dest: /etc/exim4/passwd.client
+     owner: root
+     group: Debian-exim
+     mode: 0640
+   when: nextcloud_exim4_smarthost_login is defined
+   register: exim4_passwd_file
+
+ - name: Unset exim4 smarthost login
+   become: yes
+   ansible.builtin.file:
+     path: /etc/exim4/passwd.client
+     state: absent
+   when: nextcloud_exim4_smarthost_login is not defined
+   register: exim4_passwd_file
+
+ - name: Update exim4 config
+   become: yes
+   ansible.builtin.command:
+     cmd: update-exim4.conf
+   when: exim4_conf_file.changed or exim4_passwd_file.changed
+
+ - name: Restart exim4
+   become: yes
+   ansible.builtin.systemd:
+     name: exim4.service
+     state: restarted
+   when: exim4_conf_file.changed or exim4_passwd_file.changed
